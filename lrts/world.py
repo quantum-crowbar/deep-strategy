@@ -176,11 +176,10 @@ class World:
             x, y = c.get("x"), c.get("y")
             if not (isinstance(x, int) and isinstance(y, int) and 0 <= x < self.size and 0 <= y < self.size):
                 return self._reject(p, c, "bad target", events)
-            bl = self.blocked()
             for e in sorted((e for e in self.ents.values() if e["o"] == p and e["k"] in self.rules.military),
                             key=lambda e: e["id"]):
                 e["dest"] = [x, y]
-                e["path"] = [list(s) for s in find_path((e["x"], e["y"]), (x, y), self.size, bl)]
+                self._route(e, (x, y))
         else:
             self._reject(p, c, "unknown command", events)
 
@@ -198,6 +197,11 @@ class World:
         return None
 
     # --------------------------------------------------------------- movement
+    def _route(self, e, goal):
+        """Set e['path'] to an A* route to `goal`. Returns True if a route exists."""
+        e["path"] = [list(s) for s in find_path((e["x"], e["y"]), tuple(goal), self.size, self.blocked())]
+        return bool(e["path"])
+
     def _advance(self, e):
         """Take one step along e['path'] if the move timer allows. True if moved."""
         if e["mv"] > 0:
@@ -221,11 +225,8 @@ class World:
             return
         bl = self.blocked()
         dx, dy = tx - e["x"], ty - e["y"]
-        opts = []
-        if abs(dx) >= abs(dy):
-            opts = [(_sign(dx), 0), (0, _sign(dy))]
-        else:
-            opts = [(0, _sign(dy)), (_sign(dx), 0)]
+        horizontal_first = abs(dx) >= abs(dy)
+        opts = [(_sign(dx), 0), (0, _sign(dy))] if horizontal_first else [(0, _sign(dy)), (_sign(dx), 0)]
         for sx, sy in opts:
             if (sx or sy) and (e["x"] + sx, e["y"] + sy) not in bl \
                     and 0 <= e["x"] + sx < self.size and 0 <= e["y"] + sy < self.size:
@@ -267,70 +268,65 @@ class World:
             if (e["x"], e["y"]) == tuple(e["dest"]):
                 e["dest"] = None
             else:
-                if not e["path"]:
-                    e["path"] = [list(s) for s in
-                                 find_path((e["x"], e["y"]), tuple(e["dest"]), self.size, self.blocked())]
-                    if not e["path"]:
-                        e["dest"] = None
-                        return
+                if not e["path"] and not self._route(e, e["dest"]):
+                    e["dest"] = None
+                    return
                 self._advance(e)
 
     def _worker(self, e, events):
-        g = self.rules.game
-        st = e["st"]
-        if st == "idle":
-            mines = [m for m in self.ents.values() if m["k"] == "mine"]
-            if not mines or self._hall(e["o"]) is None:
-                return
-            m = min(mines, key=lambda m: (cheb(e["x"], e["y"], m["x"], m["y"]), m["id"]))
-            e["dest"] = [m["id"]]
-            e["st"] = "tomine"
-            e["path"] = [list(s) for s in find_path((e["x"], e["y"]), (m["x"], m["y"]), self.size, self.blocked())]
-        elif st == "tomine":
-            m = self.ents.get(e["dest"][0]) if e["dest"] else None
-            if m is None or m["k"] != "mine":
-                e["st"], e["path"], e["dest"] = "idle", [], None
-                return
-            if cheb(e["x"], e["y"], m["x"], m["y"]) <= 1:
-                e["st"], e["t"], e["path"] = "mining", g["gather_ticks"], []
-                return
-            if not e["path"]:
-                e["path"] = [list(s) for s in find_path((e["x"], e["y"]), (m["x"], m["y"]), self.size, self.blocked())]
-                if not e["path"]:
-                    e["st"] = "idle"
-                    return
+        """Gather loop: idle -> tomine -> mining -> tohall -> idle (re-picks the nearest live mine)."""
+        {"idle": self._w_idle, "tomine": self._w_tomine, "mining": self._w_mining,
+         "tohall": self._w_tohall}[e["st"]](e, events)
+
+    def _mine_of(self, e):
+        m = self.ents.get(e["dest"][0]) if e["dest"] else None
+        return m if m is not None and m["k"] == "mine" else None
+
+    def _w_idle(self, e, _events):
+        mines = [m for m in self.ents.values() if m["k"] == "mine"]
+        if not mines or self._hall(e["o"]) is None:
+            return
+        m = min(mines, key=lambda m: (cheb(e["x"], e["y"], m["x"], m["y"]), m["id"]))
+        e["dest"] = [m["id"]]
+        e["st"] = "tomine"
+        self._route(e, (m["x"], m["y"]))
+
+    def _w_tomine(self, e, _events):
+        m = self._mine_of(e)
+        if m is None:
+            e["st"], e["path"], e["dest"] = "idle", [], None
+        elif cheb(e["x"], e["y"], m["x"], m["y"]) <= 1:
+            e["st"], e["t"], e["path"] = "mining", self.rules.game["gather_ticks"], []
+        elif not e["path"] and not self._route(e, (m["x"], m["y"])):
+            e["st"] = "idle"
+        else:
             self._advance(e)
-        elif st == "mining":
-            e["t"] -= 1
-            if e["t"] <= 0:
-                m = self.ents.get(e["dest"][0]) if e["dest"] else None
-                if m is None or m["k"] != "mine":
-                    e["st"], e["dest"] = "idle", None
-                    return
-                take = min(g["gather_load"], m["hp"])
-                m["hp"] -= take
-                e["carry"] = take
-                e["st"] = "tohall"
-                hall = self._hall(e["o"])
-                if hall is None:
-                    e["st"] = "idle"
-                    return
-                e["path"] = [list(s) for s in find_path((e["x"], e["y"]), (hall["x"], hall["y"]), self.size, self.blocked())]
-        elif st == "tohall":
-            hall = self._hall(e["o"])
-            if hall is None:
-                e["st"] = "idle"
-                return
-            if cheb(e["x"], e["y"], hall["x"], hall["y"]) <= 1:
-                self.gold[e["o"]] += e["carry"]
-                events.append({"ev": "gold", "p": e["o"], "n": e["carry"]})
-                e["carry"] = 0
-                e["st"] = "idle"      # re-picks the nearest live mine next tick
-                return
-            if not e["path"]:
-                e["path"] = [list(s) for s in find_path((e["x"], e["y"]), (hall["x"], hall["y"]), self.size, self.blocked())]
-                if not e["path"]:
-                    return
+
+    def _w_mining(self, e, _events):
+        e["t"] -= 1
+        if e["t"] > 0:
+            return
+        m = self._mine_of(e)
+        hall = self._hall(e["o"])
+        if m is None or hall is None:
+            e["st"], e["dest"] = "idle", None
+            return
+        take = min(self.rules.game["gather_load"], m["hp"])
+        m["hp"] -= take
+        e["carry"] = take
+        e["st"] = "tohall"
+        self._route(e, (hall["x"], hall["y"]))
+
+    def _w_tohall(self, e, events):
+        hall = self._hall(e["o"])
+        if hall is None:
+            e["st"] = "idle"
+        elif cheb(e["x"], e["y"], hall["x"], hall["y"]) <= 1:
+            self.gold[e["o"]] += e["carry"]
+            events.append({"ev": "gold", "p": e["o"], "n": e["carry"]})
+            e["carry"] = 0
+            e["st"] = "idle"
+        elif e["path"] or self._route(e, (hall["x"], hall["y"])):
             self._advance(e)
 
     def _building(self, e, events):
