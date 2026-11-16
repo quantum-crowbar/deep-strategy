@@ -6,24 +6,29 @@ Each pair plays `games` matches per side assignment on seeds 1..games, so both a
 get both sides of every map. A draw scores 0.5. Elo here is the simple sequential
 version (Q05 is still open: Bradley-Terry fits a fixed pool better).
 """
+
+from __future__ import annotations
+
 import argparse
 import itertools
 import json
 import sqlite3
 from multiprocessing import Pool
+from typing import Any
 
 from .agents import load_spec
+from .aliases import Spec
 from .match import Match
 from .rules import Rules
 
 
-def _play(job):
+def _play(job: tuple[Spec, Spec, int]) -> tuple[Any, ...]:
     s0, s1, seed = job
     r = Match(s0, s1, seed, rules=Rules()).run()
     return (s0["name"], s1["name"], seed, r["winner"], r["reason"], r["ticks"], r["hash"], json.dumps(r["error"]))
 
 
-def elo(results, names, k=24, base=1000.0):
+def elo(results: list[tuple[str, str, int]], names: list[str], k: float = 24, base: float = 1000.0) -> dict[str, float]:
     rating = {n: base for n in names}
     for a, b, winner in results:
         score_a = 1.0 if winner == 0 else 0.0 if winner == 1 else 0.5
@@ -33,7 +38,7 @@ def elo(results, names, k=24, base=1000.0):
     return rating
 
 
-def run_arena(specs, games=10, db=None, procs=1):
+def run_arena(specs: list[Spec], games: int = 10, db: str | None = None, procs: int = 1) -> list[tuple[Any, ...]]:
     jobs = []
     for a, b in itertools.combinations(specs, 2):
         for seed in range(1, games + 1):
@@ -54,7 +59,7 @@ def run_arena(specs, games=10, db=None, procs=1):
     return rows
 
 
-def report(rows, names):
+def report(rows: list[tuple[Any, ...]], names: list[str]) -> str:
     ratings = elo([(r[0], r[1], r[3]) for r in rows], names)
     wins = {(a, b): 0.0 for a in names for b in names if a != b}
     played = {(a, b): 0 for a in names for b in names if a != b}
@@ -84,7 +89,7 @@ def report(rows, names):
     return "\n".join(out)
 
 
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("specs", nargs="+")
     ap.add_argument("--games", type=int, default=10)

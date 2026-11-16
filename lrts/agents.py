@@ -8,8 +8,15 @@ Agents are allowed floats and anything else; only the sim must be integer-only.
 This agent uses no randomness: ties are broken by fixed order, so a match is a pure
 function of (spec0, spec1, seed).
 """
+
+from __future__ import annotations
+
 import tomllib
 from pathlib import Path
+from typing import Any
+
+from .aliases import Command, Obs, Row, Spec
+from .rules import Rules
 
 # name: (type, min, max, default)
 SCHEMA = {
@@ -32,7 +39,7 @@ class SpecError(ValueError):
     pass
 
 
-def validate_params(params):
+def validate_params(params: dict[str, Any]) -> dict[str, Any]:
     out = {}
     for k, v in params.items():
         if k not in SCHEMA:
@@ -50,26 +57,26 @@ def validate_params(params):
     return out
 
 
-def load_spec(path):
+def load_spec(path: str | Path) -> Spec:
     d = tomllib.loads(Path(path).read_text())
     if d.get("type", "param") != "param":
         raise SpecError(f"unknown agent type {d.get('type')!r}")
     return {"name": d.get("name", Path(path).stem), "type": "param", "params": validate_params(d.get("params", {}))}
 
 
-def spec_from_params(name, params):
+def spec_from_params(name: str, params: dict[str, Any]) -> Spec:
     return {"name": name, "type": "param", "params": validate_params(params)}
 
 
 class ParamAgent:
-    def __init__(self, spec, player, rules):
+    def __init__(self, spec: Spec, player: int, rules: Rules) -> None:
         self.p = spec["params"]
         self.player = player
         self.rules = rules
         self.last_order_army = 0
         self.last_order_tick = -999
 
-    def act(self, obs):
+    def act(self, obs: Obs) -> tuple[list[Command], str | None]:
         """obs -> (commands, note). Called by the match runner every tick; acts on its own interval."""
         t = obs["tick"]
         if t % self.p["decision_interval"] != 0:
@@ -87,7 +94,7 @@ class ParamAgent:
         cmds, notes = [], []
         gold = obs["gold"] - self.p["reserve_gold"]
 
-        def cost(unit):
+        def cost(unit: str) -> int:
             return self.rules.units[unit]["cost"]
 
         if n_workers + queued_workers < self.p["workers"] and gold >= cost("worker"):
@@ -125,7 +132,7 @@ class ParamAgent:
                 notes.append(f"attack({len(army)})")
         return cmds, (", ".join(notes) or None)
 
-    def _pick_unit(self, army, foes):
+    def _pick_unit(self, army: list[Row], foes: list[Row]) -> str:
         w = {"sword": self.p["w_sword"], "archer": self.p["w_archer"], "knight": self.p["w_knight"]}
         cp = self.p["counter_pick"]
         if cp > 0:
@@ -136,15 +143,16 @@ class ParamAgent:
                     w[COUNTER[u]] += cp * n / total
         have = {u: sum(1 for e in army if e[2] == u) for u in w}
         # weighted round-robin: build whichever unit is furthest below its target share
-        best = None
+        best: tuple[tuple[float, str], str] | None = None
         for u in sorted(w):
             if w[u] <= 0:
                 continue
             key = (have[u] / w[u], u)
             if best is None or key < best[0]:
                 best = (key, u)
+        assert best is not None      # schema guarantees at least one positive weight
         return best[1]
 
 
-def make_agent(spec, player, rules):
+def make_agent(spec: Spec, player: int, rules: Rules) -> ParamAgent:
     return ParamAgent(spec, player, rules)

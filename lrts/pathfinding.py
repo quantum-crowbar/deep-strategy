@@ -3,12 +3,17 @@
 Ties in the priority queue are broken by an insertion counter, so the same inputs
 always give the same path (a heap of bare tuples would compare the nodes instead).
 """
+
+from __future__ import annotations
+
 import heapq
+
+from .aliases import Pos
 
 DIRS = ((0, -1), (1, 0), (0, 1), (-1, 0))
 
 
-def find_path(start, goal, size, blocked, max_expand=2500):
+def find_path(start: Pos, goal: Pos, size: int, blocked: set[Pos], max_expand: int = 2500) -> list[Pos]:
     """Return the list of tiles from just after `start` up to and including `goal`.
 
     `blocked` is a set of (x, y). The goal itself may be blocked (a building or a
@@ -20,7 +25,7 @@ def find_path(start, goal, size, blocked, max_expand=2500):
     gx, gy = goal
     open_heap = [(abs(start[0] - gx) + abs(start[1] - gy), 0, 0, start)]
     best = {start: 0}
-    came = {}
+    came: dict[Pos, Pos] = {}
     counter = 0
     expanded = 0
     while open_heap:

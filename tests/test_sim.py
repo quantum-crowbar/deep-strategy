@@ -170,3 +170,10 @@ def test_economy_and_production_work():
     kinds = {e["k"] for e in m.world.ents.values() if e["o"] == 0}
     assert {"hall", "barracks", "worker"} <= kinds
     assert any(k in kinds for k in RULES.military)
+
+
+def test_build_with_unhashable_name_is_rejected_not_raised():
+    terrain, bases, mines = generate(1)
+    w = World(RULES, terrain, bases, mines)
+    ev = w.step([[{"type": "build", "building": ["barracks"]}], []])
+    assert [e["why"] for e in ev if e["ev"] == "rejected"] == ["unknown building"]

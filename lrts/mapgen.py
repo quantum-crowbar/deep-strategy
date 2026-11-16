@@ -3,11 +3,16 @@
 The RNG is a local `random.Random(seed)`: no global state (a lesson from ejaj-boj,
 whose determinism needed a global id counter reset and the global `random`).
 """
+
+from __future__ import annotations
+
 import random
 from collections import deque
 
+from .aliases import Pos
 
-def _connected(terrain, size, a, b):
+
+def _connected(terrain: list[str], size: int, a: Pos, b: Pos) -> bool:
     seen = {a}
     q = deque([a])
     while q:
@@ -22,7 +27,7 @@ def _connected(terrain, size, a, b):
     return False
 
 
-def generate(seed, size=32):
+def generate(seed: int, size: int = 32) -> tuple[list[str], list[Pos], list[Pos]]:
     """Return (terrain rows, base positions, mine positions). Terrain: '.' floor, '#' rock."""
     rng = random.Random(seed)
     last = size - 1

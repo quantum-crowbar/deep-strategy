@@ -12,19 +12,25 @@ Design points (real-time-systems track, D27):
     match or the other spectators.
   * Every live match is also recorded, and written to replays/ when it ends.
 """
+
+from __future__ import annotations
+
 import argparse
 import asyncio
 import contextlib
 import json
 import mimetypes
 import time
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 from websockets.asyncio.server import serve
 from websockets.datastructures import Headers
 from websockets.http11 import Response
 
 from .agents import load_spec
+from .aliases import Spec
 from .match import Match
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -33,17 +39,18 @@ REPLAYS = ROOT / "replays"
 
 
 class Spectator:
-    def __init__(self, ws):
+    def __init__(self, ws: Any) -> None:
         self.ws = ws
-        self.mailbox = None          # latest frame message (overwritten, never queued)
-        self.pending_notes = {}      # agent notes of frames we skipped: merged, never lost
-        self.priority = []           # messages that must not be dropped (hello, end)
+        self.mailbox: str | None = None          # latest frame message (overwritten, never queued)
+        # agent notes of frames we skipped: merged into the next frame, never lost
+        self.pending_notes: dict[int, Sequence[str | None]] = {}
+        self.priority: list[str] = []           # messages that must not be dropped (hello, end)
         self.wake = asyncio.Event()
         self.dropped = 0
         self.sent = 0
         self.bytes = 0
 
-    def offer_frame(self, msg, notes=None):
+    def offer_frame(self, msg: str, notes: dict[int, Sequence[str | None]] | None = None) -> None:
         if self.mailbox is not None:
             self.dropped += 1
         self.mailbox = msg
@@ -51,17 +58,20 @@ class Spectator:
             self.pending_notes.update(notes)
         self.wake.set()
 
-    def offer_reliable(self, msg):
+    def offer_reliable(self, msg: str) -> None:
         self.priority.append(msg)
         self.wake.set()
 
-    async def pump(self):
+    async def pump(self) -> None:
         while True:
             await self.wake.wait()
             self.wake.clear()
             while self.priority or self.mailbox is not None:
-                msg = self.priority.pop(0) if self.priority else self.mailbox
-                if msg is self.mailbox:
+                if self.priority:
+                    msg = self.priority.pop(0)
+                else:
+                    assert self.mailbox is not None
+                    msg = self.mailbox
                     self.mailbox = None
                     if self.pending_notes:       # splice the merged notes into the frame JSON
                         msg = msg[:-1] + ',"notes":' + json.dumps(self.pending_notes) + "}"
@@ -72,18 +82,18 @@ class Spectator:
 
 
 class Room:
-    def __init__(self, spec0, spec1, seed, tps):
+    def __init__(self, spec0: Spec, spec1: Spec, seed: int, tps: float) -> None:
         self.match = Match(spec0, spec1, seed, record=True)
         self.tps = tps
         self.paused = False
         self.step_once = False
-        self.spectators = set()
+        self.spectators: set[Spectator] = set()
         self.hello = json.dumps({"type": "hello", **self.match.header(), "tps": tps})
-        self.last_frame_msg = None
-        self.end_msg = None
-        self.replay_path = None
+        self.last_frame_msg: str | None = None
+        self.end_msg: str | None = None
+        self.replay_path: Path | None = None
 
-    def command(self, d):
+    def command(self, d: dict[str, Any]) -> None:
         c = d.get("cmd")
         if c == "pause":
             self.paused = True
@@ -94,7 +104,7 @@ class Room:
         elif c == "speed" and isinstance(d.get("v"), (int, float)):
             self.tps = max(1, min(2000, float(d["v"])))
 
-    def broadcast_frame(self, fr, notes):
+    def broadcast_frame(self, fr: dict[str, Any], notes: Sequence[str | None]) -> None:
         msg = json.dumps({"type": "frame", **fr, "paused": self.paused, "tps": self.tps},
                          separators=(",", ":"))
         self.last_frame_msg = msg
@@ -102,7 +112,7 @@ class Room:
         for s in list(self.spectators):
             s.offer_frame(msg, note)
 
-    async def run(self):
+    async def run(self) -> None:
         m = self.match
         next_deadline = time.perf_counter()
         while not m.finished:
@@ -130,7 +140,7 @@ class Room:
             s.offer_reliable(self.end_msg)
 
 
-def _http(path):
+def _http(path: str) -> Response:
     if path in ("", "/"):
         path = "/index.html"
     if path == "/replays.json":
@@ -151,8 +161,8 @@ def _http(path):
     return Response(200, "OK", Headers([("Content-Type", ctype), ("Content-Length", str(len(body)))]), body)
 
 
-async def serve_room(room, host, port):
-    async def handler(ws):
+async def serve_room(room: Room, host: str, port: int) -> None:
+    async def handler(ws: Any) -> None:
         spec = Spectator(ws)
         spec.offer_reliable(room.hello)
         if room.last_frame_msg:
@@ -169,7 +179,7 @@ async def serve_room(room, host, port):
             room.spectators.discard(spec)
             pump.cancel()
 
-    def process_request(connection, request):
+    def process_request(connection: Any, request: Any) -> Response | None:
         if request.headers.get("Upgrade", "").lower() == "websocket":
             return None
         return _http(request.path.split("?")[0])
@@ -179,7 +189,7 @@ async def serve_room(room, host, port):
         await asyncio.sleep(3600)       # keep serving the finished match / replays
 
 
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("spec0")
     ap.add_argument("spec1")

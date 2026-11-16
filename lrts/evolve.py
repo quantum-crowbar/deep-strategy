@@ -8,18 +8,23 @@ a plain ES is enough to see whether search over the spec space finds anything. C
 Usage: python -m lrts.evolve specs/rush.toml specs/boom.toml ... --gens 10 --out specs/evolved.toml
 (the listed specs are the opponent pool)
 """
+
+from __future__ import annotations
+
 import argparse
 import json
 import random
 from multiprocessing import Pool
 from pathlib import Path
+from typing import Any
 
 from .agents import SCHEMA, load_spec, spec_from_params
+from .aliases import Spec
 from .match import Match
 from .rules import Rules
 
 
-def _score(args):
+def _score(args: tuple[Spec, Spec, int, int]) -> float:
     spec, opp, seed, side = args
     pair = (spec, opp) if side == 0 else (opp, spec)
     w = Match(*pair, seed, rules=Rules()).run()["winner"]
@@ -28,14 +33,14 @@ def _score(args):
     return 1.0 if w == side else 0.0
 
 
-def evaluate(pool, specs, opponents, seeds):
+def evaluate(pool: Any, specs: list[Spec], opponents: list[Spec], seeds: list[int]) -> list[float]:
     jobs = [(s, o, seed, side) for s in specs for o in opponents for seed in seeds for side in (0, 1)]
     res = pool.map(_score, jobs, chunksize=8)
     per = len(opponents) * len(seeds) * 2
     return [sum(res[i * per:(i + 1) * per]) / per for i in range(len(specs))]
 
 
-def mutate(params, rng, strength):
+def mutate(params: dict[str, Any], rng: random.Random, strength: float) -> dict[str, Any]:
     out = dict(params)
     for k, (typ, lo, hi, _d) in SCHEMA.items():
         if rng.random() < 0.4:
@@ -47,14 +52,14 @@ def mutate(params, rng, strength):
     return out
 
 
-def write_toml(path, name, params, note):
+def write_toml(path: str | Path, name: str, params: dict[str, Any], note: str) -> None:
     lines = [f'name = "{name}"', 'type = "param"', f"# {note}", "[params]"]
     for k, v in params.items():
         lines.append(f"{k} = {round(v, 4) if isinstance(v, float) else v}")
     Path(path).write_text("\n".join(lines) + "\n")
 
 
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("pool", nargs="+")
     ap.add_argument("--gens", type=int, default=10)

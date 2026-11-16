@@ -6,24 +6,32 @@ Contract (the same one the Rust port must meet):
   * `snapshot()` / `restore()` round-trip exactly; `state_hash()` fingerprints a state.
   * Entities are processed in ascending id order, so iteration order never decides anything.
 """
+
+from __future__ import annotations
+
 import hashlib
 import json
+from collections.abc import Sequence
+from typing import Any
 
+from .aliases import Command, Entity, Event, Obs, Pos
 from .pathfinding import find_path
+from .rules import Rules
 
 MILITARY_ST = ("idle",)
 
 
-def cheb(ax, ay, bx, by):
+def cheb(ax: int, ay: int, bx: int, by: int) -> int:
     return max(abs(ax - bx), abs(ay - by))
 
 
-def _sign(v):
+def _sign(v: int) -> int:
     return (v > 0) - (v < 0)
 
 
 class World:
-    def __init__(self, rules, terrain, bases, mines, snap=None):
+    def __init__(self, rules: Rules, terrain: list[str], bases: list[Pos], mines: list[Pos],
+                 snap: dict[str, Any] | None = None) -> None:
         self.rules = rules
         self.terrain = terrain
         self.size = rules.game["map_size"]
@@ -35,30 +43,32 @@ class World:
             self._load(snap)
 
     # ---------------------------------------------------------------- setup
-    def _init_fresh(self):
+    def _init_fresh(self) -> None:
         g = self.rules.game
         self.tick = 0
         self.next_id = 1
         self.gold = [g["start_gold"], g["start_gold"]]
-        self.result = None
-        self.ents = {}
+        self.result: dict[str, Any] | None = None
+        self.ents: dict[int, Entity] = {}
         for p, (bx, by) in enumerate(self.bases):
             self._spawn_building(p, "hall", bx, by, ready=True)
         for mx, my in self.mine_pos:
             self._new("mine", -1, mx, my, hp=g["mine_amount"])
         for p in (0, 1):
             for _ in range(g["start_workers"]):
-                self._spawn_unit(p, "worker", self._hall(p))
-        self._blocked = None
+                hall = self._hall(p)
+                assert hall is not None
+                self._spawn_unit(p, "worker", hall)
+        self._blocked: set[Pos] | None = None
 
-    def _new(self, kind, owner, x, y, hp):
+    def _new(self, kind: str, owner: int, x: int, y: int, hp: int) -> Entity:
         e = {"id": self.next_id, "o": owner, "k": kind, "x": x, "y": y, "hp": hp,
              "cd": 0, "mv": 0, "dest": None, "path": [], "st": "idle", "t": 0, "carry": 0, "q": []}
         self.ents[self.next_id] = e
         self.next_id += 1
         return e
 
-    def _spawn_building(self, owner, kind, x, y, ready):
+    def _spawn_building(self, owner: int, kind: str, x: int, y: int, ready: bool) -> Entity:
         spec = self.rules.buildings[kind]
         e = self._new(kind, owner, x, y, spec["hp"])
         if not ready:
@@ -66,19 +76,19 @@ class World:
         self._blocked = None
         return e
 
-    def _spawn_unit(self, owner, kind, building):
+    def _spawn_unit(self, owner: int, kind: str, building: Entity) -> Entity:
         spot = self._free_adjacent(building["x"], building["y"])
         e = self._new(kind, owner, spot[0], spot[1], self.rules.units[kind]["hp"])
         return e
 
     # -------------------------------------------------------------- queries
-    def _hall(self, p):
+    def _hall(self, p: int) -> Entity | None:
         for e in self.ents.values():
             if e["k"] == "hall" and e["o"] == p:
                 return e
         return None
 
-    def blocked(self):
+    def blocked(self) -> set[Pos]:
         if self._blocked is None:
             b = set()
             for y, row in enumerate(self.terrain):
@@ -91,7 +101,7 @@ class World:
             self._blocked = b
         return self._blocked
 
-    def _free_adjacent(self, x, y):
+    def _free_adjacent(self, x: int, y: int) -> Pos:
         bl = self.blocked()
         for r in range(1, 6):
             for dy in range(-r, r + 1):
@@ -103,16 +113,16 @@ class World:
                         return n
         return (x, y)
 
-    def _is_building(self, e):
+    def _is_building(self, e: Entity) -> bool:
         return e["k"] in self.rules.buildings
 
-    def _enemies_of(self, p):
+    def _enemies_of(self, p: int) -> list[Entity]:
         return [e for e in self.ents.values() if e["o"] == 1 - p]
 
     # ---------------------------------------------------------------- step
-    def step(self, commands):
+    def step(self, commands: list[list[Command]]) -> list[Event]:
         """Advance one tick. `commands` = [list for player 0, list for player 1]."""
-        events = []
+        events: list[Event] = []
         if self.result is not None:
             return events
         for p in (0, 1):
@@ -135,10 +145,10 @@ class World:
         return events
 
     # ------------------------------------------------------------- commands
-    def _reject(self, p, c, why, events):
+    def _reject(self, p: int, c: Any, why: str, events: list[Event]) -> None:
         events.append({"ev": "rejected", "p": p, "why": why})
 
-    def _apply_command(self, p, c, events):
+    def _apply_command(self, p: int, c: Any, events: list[Event]) -> None:
         if not isinstance(c, dict):
             return self._reject(p, c, "not a dict", events)
         t = c.get("type")
@@ -159,9 +169,9 @@ class World:
             b["q"].append([u, spec["train_ticks"]])
         elif t == "build":
             name = c.get("building")
-            spec = self.rules.buildings.get(name)
-            if spec is None or name == "hall":
+            if not isinstance(name, str) or name == "hall" or name not in self.rules.buildings:
                 return self._reject(p, c, "unknown building", events)
+            spec = self.rules.buildings[name]
             if self.gold[p] < spec["cost"]:
                 return self._reject(p, c, "no gold", events)
             hall = self._hall(p)
@@ -183,7 +193,7 @@ class World:
         else:
             self._reject(p, c, "unknown command", events)
 
-    def _build_spot(self, hall):
+    def _build_spot(self, hall: Entity) -> Pos | None:
         bl = self.blocked()
         hx, hy = hall["x"], hall["y"]
         for r in (3, 4, 5):
@@ -197,12 +207,12 @@ class World:
         return None
 
     # --------------------------------------------------------------- movement
-    def _route(self, e, goal):
+    def _route(self, e: Entity, goal: Sequence[int]) -> bool:
         """Set e['path'] to an A* route to `goal`. Returns True if a route exists."""
-        e["path"] = [list(s) for s in find_path((e["x"], e["y"]), tuple(goal), self.size, self.blocked())]
+        e["path"] = [list(s) for s in find_path((e["x"], e["y"]), (goal[0], goal[1]), self.size, self.blocked())]
         return bool(e["path"])
 
-    def _advance(self, e):
+    def _advance(self, e: Entity) -> bool:
         """Take one step along e['path'] if the move timer allows. True if moved."""
         if e["mv"] > 0:
             e["mv"] -= 1
@@ -218,7 +228,7 @@ class World:
         e["mv"] = self.rules.units[e["k"]]["speed"] - 1
         return True
 
-    def _chase_step(self, e, tx, ty):
+    def _chase_step(self, e: Entity, tx: int, ty: int) -> None:
         """Greedy step toward (tx, ty); fall back to A* if both greedy moves are blocked."""
         if e["mv"] > 0:
             e["mv"] -= 1
@@ -240,7 +250,7 @@ class World:
             e["mv"] = self.rules.units[e["k"]]["speed"] - 1
 
     # ---------------------------------------------------------------- units
-    def _military(self, e, events):
+    def _military(self, e: Entity, events: list[Event]) -> None:
         spec = self.rules.units[e["k"]]
         if e["cd"] > 0:
             e["cd"] -= 1
@@ -273,16 +283,16 @@ class World:
                     return
                 self._advance(e)
 
-    def _worker(self, e, events):
+    def _worker(self, e: Entity, events: list[Event]) -> None:
         """Gather loop: idle -> tomine -> mining -> tohall -> idle (re-picks the nearest live mine)."""
         {"idle": self._w_idle, "tomine": self._w_tomine, "mining": self._w_mining,
          "tohall": self._w_tohall}[e["st"]](e, events)
 
-    def _mine_of(self, e):
+    def _mine_of(self, e: Entity) -> Entity | None:
         m = self.ents.get(e["dest"][0]) if e["dest"] else None
         return m if m is not None and m["k"] == "mine" else None
 
-    def _w_idle(self, e, _events):
+    def _w_idle(self, e: Entity, _events: list[Event]) -> None:
         mines = [m for m in self.ents.values() if m["k"] == "mine"]
         if not mines or self._hall(e["o"]) is None:
             return
@@ -291,7 +301,7 @@ class World:
         e["st"] = "tomine"
         self._route(e, (m["x"], m["y"]))
 
-    def _w_tomine(self, e, _events):
+    def _w_tomine(self, e: Entity, _events: list[Event]) -> None:
         m = self._mine_of(e)
         if m is None:
             e["st"], e["path"], e["dest"] = "idle", [], None
@@ -302,7 +312,7 @@ class World:
         else:
             self._advance(e)
 
-    def _w_mining(self, e, _events):
+    def _w_mining(self, e: Entity, _events: list[Event]) -> None:
         e["t"] -= 1
         if e["t"] > 0:
             return
@@ -317,7 +327,7 @@ class World:
         e["st"] = "tohall"
         self._route(e, (hall["x"], hall["y"]))
 
-    def _w_tohall(self, e, events):
+    def _w_tohall(self, e: Entity, events: list[Event]) -> None:
         hall = self._hall(e["o"])
         if hall is None:
             e["st"] = "idle"
@@ -329,7 +339,7 @@ class World:
         elif e["path"] or self._route(e, (hall["x"], hall["y"])):
             self._advance(e)
 
-    def _building(self, e, events):
+    def _building(self, e: Entity, events: list[Event]) -> None:
         if e["st"] == "building":
             e["t"] -= 1
             if e["t"] <= 0:
@@ -344,7 +354,7 @@ class World:
                 events.append({"ev": "spawn", "id": nu["id"], "p": e["o"], "kind": u})
 
     # ---------------------------------------------------------------- end of tick
-    def _reap(self, events):
+    def _reap(self, events: list[Event]) -> None:
         dead = [i for i, e in self.ents.items() if e["hp"] <= 0]
         for i in sorted(dead):
             e = self.ents.pop(i)
@@ -352,11 +362,11 @@ class World:
             if e["k"] in self.rules.buildings or e["k"] == "mine":
                 self._blocked = None
 
-    def _army_value(self, p):
+    def _army_value(self, p: int) -> int:
         return sum(self.rules.units[e["k"]]["cost"] for e in self.ents.values()
                    if e["o"] == p and e["k"] in self.rules.military)
 
-    def _check_result(self, events):
+    def _check_result(self, events: list[Event]) -> None:
         h = [self._hall(0), self._hall(1)]
         if h[0] is None and h[1] is None:
             self.result = {"winner": -1, "reason": "both halls destroyed"}
@@ -373,7 +383,7 @@ class World:
             events.append({"ev": "end", **self.result})
 
     # --------------------------------------------------------------- observation
-    def observe(self, p):
+    def observe(self, p: int) -> Obs:
         """What agent p sees (no fog yet, D21). Rows are copies, so agents cannot corrupt the sim."""
         rows = [(e["id"], e["o"], e["k"], e["x"], e["y"], e["hp"], e["st"], len(e["q"]))
                 for e in sorted(self.ents.values(), key=lambda e: e["id"])]
@@ -381,12 +391,12 @@ class World:
                 "entities": rows}
 
     # ---------------------------------------------------------------- snapshot
-    def snapshot(self):
+    def snapshot(self) -> dict[str, Any]:
         return json.loads(json.dumps({
             "tick": self.tick, "next_id": self.next_id, "gold": self.gold, "result": self.result,
             "ents": [self.ents[i] for i in sorted(self.ents)]}))
 
-    def _load(self, snap):
+    def _load(self, snap: dict[str, Any]) -> None:
         self.tick = snap["tick"]
         self.next_id = snap["next_id"]
         self.gold = list(snap["gold"])
@@ -395,9 +405,10 @@ class World:
         self._blocked = None
 
     @classmethod
-    def restore(cls, snap, rules, terrain, bases, mines):
+    def restore(cls, snap: dict[str, Any], rules: Rules, terrain: list[str], bases: list[Pos],
+                mines: list[Pos]) -> World:
         return cls(rules, terrain, bases, mines, snap=snap)
 
-    def state_hash(self):
+    def state_hash(self) -> str:
         blob = json.dumps(self.snapshot(), sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(blob.encode()).hexdigest()[:16]
