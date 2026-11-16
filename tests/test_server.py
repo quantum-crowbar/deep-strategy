@@ -1,9 +1,9 @@
 """Live server: streaming, controls, backpressure, replay written, static files."""
 import asyncio
+import contextlib
 import json
 import urllib.request
 
-import pytest
 from websockets.asyncio.client import connect
 
 from lrts import server
@@ -25,10 +25,8 @@ async def _with_server(room, fn, tmp_path):
         return await fn(port)
     finally:
         task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError, Exception):
             await task
-        except (asyncio.CancelledError, Exception):
-            pass
 
 
 def test_live_stream_end_and_replay(tmp_path):

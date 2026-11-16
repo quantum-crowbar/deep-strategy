@@ -103,7 +103,7 @@ def test_step_does_not_depend_on_wall_time():
 
 def test_map_is_point_symmetric_and_connected():
     for seed in range(1, 20):
-        t, bases, mines = generate(seed)
+        t, bases, _mines = generate(seed)
         n = len(t)
         for y in range(n):
             for x in range(n):

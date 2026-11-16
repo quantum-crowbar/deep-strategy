@@ -78,7 +78,7 @@ def main():
             kids = [mutate(rng.choice(parents), rng, strength) for _ in range(a.lam)]
             cands = parents + kids
             fit = evaluate(pool, [spec_from_params("c", c) for c in cands], opponents, seeds)
-            ranked = sorted(zip(fit, range(len(cands))), key=lambda t: -t[0])
+            ranked = sorted(zip(fit, range(len(cands)), strict=True), key=lambda t: -t[0])
             parents = [cands[i] for _, i in ranked[:a.mu]]
             line = f"gen {g + 1}/{a.gens}: best {ranked[0][0]:.3f}, mean {sum(fit) / len(fit):.3f}"
             print(line, flush=True)
@@ -88,7 +88,8 @@ def main():
         val = evaluate(pool, [best], opponents, list(range(1, 21)))[0]
         print(f"validation (20 unseen maps x {len(opponents)} opponents x 2 sides): {val:.3f}")
         base = [evaluate(pool, [o], [x for x in opponents if x is not o], list(range(1, 11)))[0] for o in opponents]
-        print("hand-written agents vs the others (10 maps):", {o['name']: round(b, 3) for o, b in zip(opponents, base)})
+        scores = {o["name"]: round(b, 3) for o, b in zip(opponents, base, strict=True)}
+        print("hand-written agents vs the others (10 maps):", scores)
     write_toml(a.out, "evolved", best["params"], f"ES, {a.gens} gens, validation score {val:.3f}")
     if a.log:
         Path(a.log).write_text(json.dumps(log, indent=1))

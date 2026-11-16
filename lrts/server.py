@@ -14,10 +14,10 @@ Design points (real-time-systems track, D27):
 """
 import argparse
 import asyncio
+import contextlib
 import json
 import mimetypes
 import time
-from http import HTTPStatus
 from pathlib import Path
 
 from websockets.asyncio.server import serve
@@ -136,7 +136,8 @@ def _http(path):
     if path == "/replays.json":
         names = sorted(p.name for p in REPLAYS.glob("*.json")) if REPLAYS.exists() else []
         body = json.dumps(names).encode()
-        return Response(200, "OK", Headers([("Content-Type", "application/json"), ("Content-Length", str(len(body)))]), body)
+        headers = Headers([("Content-Type", "application/json"), ("Content-Length", str(len(body)))])
+        return Response(200, "OK", headers, body)
     if path.startswith("/replays/"):
         f = (REPLAYS / path[len("/replays/"):]).resolve()
         base = REPLAYS.resolve()
@@ -162,10 +163,8 @@ async def serve_room(room, host, port):
         pump = asyncio.create_task(spec.pump())
         try:
             async for raw in ws:
-                try:
+                with contextlib.suppress(ValueError, AttributeError):   # garbage from a client is ignored
                     room.command(json.loads(raw))
-                except (ValueError, AttributeError):
-                    pass
         finally:
             room.spectators.discard(spec)
             pump.cancel()

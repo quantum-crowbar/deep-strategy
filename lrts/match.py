@@ -41,7 +41,8 @@ class Match:
         w = self.world
         k = {n: i for i, n in enumerate(self.kinds)}
         return {"t": w.tick, "g": list(w.gold),
-                "e": [[e["id"], e["o"], k[e["k"]], e["x"], e["y"], e["hp"]] for e in sorted(w.ents.values(), key=lambda e: e["id"])],
+                "e": [[e["id"], e["o"], k[e["k"]], e["x"], e["y"], e["hp"]]
+                      for e in sorted(w.ents.values(), key=lambda e: e["id"])],
                 "a": [[a["a"], a["t"]] for a in attacks]}
 
     def tick_once(self):
@@ -57,7 +58,7 @@ class Match:
                 if not isinstance(c, list):
                     raise TypeError(f"agent returned {type(c).__name__}, expected list")
                 cmds[p], notes[p] = c, n
-            except Exception as ex:  # an agent bug ends this match, never the process
+            except Exception as ex:  # noqa: BLE001  deliberate: an agent bug ends this match, never the process
                 self.error = {"player": p, "error": f"{type(ex).__name__}: {ex}"}
             self.timing[p] += time.perf_counter() - t0
         if self.error is not None:

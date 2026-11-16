@@ -86,7 +86,9 @@ class ParamAgent:
         army = [e for e in mine if e[2] in self.rules.military]
         cmds, notes = [], []
         gold = obs["gold"] - self.p["reserve_gold"]
-        cost = lambda u: self.rules.units[u]["cost"]
+
+        def cost(unit):
+            return self.rules.units[unit]["cost"]
 
         if n_workers + queued_workers < self.p["workers"] and gold >= cost("worker"):
             cmds.append({"type": "train", "unit": "worker"})
@@ -115,12 +117,12 @@ class ParamAgent:
                     cmds.append({"type": "attack_move", "x": hx, "y": hy})
                     self.last_order_tick = t
                     notes.append("defend")
-            elif len(army) >= self.p["attack_size"] and enemy_hall:
-                if len(army) >= self.last_order_army + 3 or t - self.last_order_tick >= 150:
-                    cmds.append({"type": "attack_move", "x": enemy_hall[0][3], "y": enemy_hall[0][4]})
-                    self.last_order_army = len(army)
-                    self.last_order_tick = t
-                    notes.append(f"attack({len(army)})")
+            elif (len(army) >= self.p["attack_size"] and enemy_hall
+                  and (len(army) >= self.last_order_army + 3 or t - self.last_order_tick >= 150)):
+                cmds.append({"type": "attack_move", "x": enemy_hall[0][3], "y": enemy_hall[0][4]})
+                self.last_order_army = len(army)
+                self.last_order_tick = t
+                notes.append(f"attack({len(army)})")
         return cmds, (", ".join(notes) or None)
 
     def _pick_unit(self, army, foes):
@@ -133,7 +135,6 @@ class ParamAgent:
                 for u, n in seen.items():
                     w[COUNTER[u]] += cp * n / total
         have = {u: sum(1 for e in army if e[2] == u) for u in w}
-        wsum = sum(w.values())
         # weighted round-robin: build whichever unit is furthest below its target share
         best = None
         for u in sorted(w):
