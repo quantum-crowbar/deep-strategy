@@ -19,7 +19,7 @@ this repository holds only the code.
 
 ## Where the code stands
 
-Built so far is the Python reference implementation of M0 to M4; Rust is not started
+Built so far is the Python reference implementation of M1 to M4, with M0 only partly done and the M1 determinism gate checked on one machine; Rust is not started
 ([D26](https://github.com/quantum-crowbar/learning-rts/blob/main/docs/general/decisions.md)). The [Progress table](https://github.com/quantum-crowbar/learning-rts/blob/main/docs/roadmap/ROADMAP.md#progress) in the roadmap says, per milestone, what is
 done, what is partly done and what is not, with the evidence and caveats.
 One caveat matters before anything else: the first evolved agent wins by exploiting the
