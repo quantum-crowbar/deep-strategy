@@ -1,0 +1,10 @@
+name = "boom"
+type = "param"
+[params]
+workers = 10
+barracks_at = 300
+attack_size = 14
+w_sword = 0.3
+w_archer = 0.4
+w_knight = 0.3
+decision_interval = 10

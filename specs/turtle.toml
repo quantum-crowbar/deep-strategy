@@ -1,0 +1,11 @@
+name = "turtle"
+type = "param"
+[params]
+workers = 7
+barracks = 2
+barracks_at = 100
+attack_size = 26
+w_sword = 0.2
+w_archer = 0.6
+w_knight = 0.2
+decision_interval = 10

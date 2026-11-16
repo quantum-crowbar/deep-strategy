@@ -1,0 +1,10 @@
+name = "rush"
+type = "param"
+[params]
+workers = 4
+barracks_at = 40
+attack_size = 4
+w_sword = 0.7
+w_archer = 0.1
+w_knight = 0.2
+decision_interval = 5

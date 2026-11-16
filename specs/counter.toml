@@ -1,0 +1,8 @@
+name = "counter"
+type = "param"
+[params]
+workers = 6
+barracks_at = 100
+attack_size = 10
+counter_pick = 1.0
+decision_interval = 10
