@@ -1,0 +1,14 @@
+name = "evolved"
+type = "param"
+# ES, 12 gens, validation score 0.938. WARNING: wins every game at the time limit by hoarding army and never attacking; it exploits the time-limit tiebreak, it is not a strong fighter.
+[params]
+workers = 5
+barracks = 1
+barracks_at = 65
+w_sword = 0.0
+w_archer = 0.2791
+w_knight = 0.3084
+counter_pick = 0.1007
+attack_size = 40
+decision_interval = 1
+reserve_gold = 117
