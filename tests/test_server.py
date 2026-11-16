@@ -48,6 +48,7 @@ def test_live_stream_end_and_replay(tmp_path):
     rep = json.loads((tmp_path / end["replay"]).read_text())
     assert rep["header"]["seed"] == 1 and rep["header"]["rules_hash"] and len(rep["frames"]) == end["result"]["ticks"]
     assert rep["result"]["hash"] == end["result"]["hash"]
+    assert rep["header"]["speed"]["worker"] == 4          # the viewer glides units over this many ticks
 
 
 def test_pause_step_speed(tmp_path):

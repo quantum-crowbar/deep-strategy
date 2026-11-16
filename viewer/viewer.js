@@ -7,7 +7,8 @@ ctx.imageSmoothingEnabled = false;
 
 const S = {
   header: null, frames: [], notes: {}, cur: 0, mode: "none", playing: true, tps: 20,
-  followLive: true, ws: null, selected: null, skin: { kinds: {} }, images: {}, result: null, acc: 0, last: 0,
+  followLive: true, ws: null, selected: null, skin: { kinds: {} }, images: {}, result: null, last: 0,
+  t: 0, maps: [], dir: {},
 };
 const COLORS = ["#e0b43a", "#7e8aa8"];
 
@@ -34,7 +35,7 @@ async function loadSkin(name) {
 // ---------------------------------------------------------------- loading
 function reset(mode) {
   if (S.ws) { S.ws.close(); S.ws = null; }
-  Object.assign(S, { frames: [], notes: {}, cur: 0, mode, result: null, selected: null, followLive: true, acc: 0 });
+  Object.assign(S, { frames: [], notes: {}, cur: 0, t: 0, maps: [], dir: {}, mode, result: null, selected: null, followLive: true });
   $("log").textContent = "";
   $("scrub").disabled = mode === "none";
 }
@@ -62,7 +63,6 @@ function watchLive() {
       if (d.notes) for (const k in d.notes) S.notes[k] = d.notes[k];
       S.playing = !d.paused;
       $("play").textContent = d.paused ? "Play" : "Pause";
-      if (S.followLive) S.cur = S.frames.length - 1;
     } else if (d.type === "end") {
       S.result = d.result;
       $("status").textContent = `finished: ${resultText(d.result)} — saved as replays/${d.replay}`;
@@ -113,31 +113,60 @@ function draw() {
     ctx.fillRect(x * T, y * T, T, T);
     if (rock) { ctx.fillStyle = "#62676f"; ctx.fillRect(x * T + 3, y * T + 3, T - 6, T - 6); }
   }
+  const idx = Math.min(S.frames.length - 1, Math.floor(S.t));
+  S.cur = Math.max(0, idx);
   const f = S.frames[S.cur], prev = S.frames[S.cur - 1];
   if (!f) return;
-  const byId = {};
-  for (const e of entsOf(prev)) byId[e[0]] = e;
-  for (const e of entsOf(f)) byId[e[0]] = e;
-  const ents = entsOf(f).slice().sort((a, b) => a[4] - b[4] || a[0] - b[0]);
-  const tickNow = f.t;
-  for (const e of ents) drawEntity(e, tickNow);
+  const pos = {};                      // id -> displayed [x, y] in tile units, glided between tiles
+  for (const e of entsOf(f)) pos[e[0]] = displayPos(e, S.cur, S.t);
+  const ents = entsOf(f).slice().sort((a, b) => pos[a[0]][1] - pos[b[0]][1] || a[0] - b[0]);
+  for (const e of ents) drawEntity(e, pos[e[0]]);
   ctx.lineWidth = 2;
+  const prevById = {};
+  for (const e of entsOf(prev)) prevById[e[0]] = e;
+  const at = (id) => pos[id] || (prevById[id] ? [prevById[id][3], prevById[id][4]] : null);
   for (const [a, t] of f.a || []) {
-    const A = byId[a], B = byId[t];
+    const A = at(a), B = at(t);
+    const owner = (byRow(S.cur, a) || prevById[a] || [0, 0])[1];
     if (!A || !B) continue;
-    ctx.strokeStyle = COLORS[A[1]] || "#fff";
-    ctx.beginPath(); ctx.moveTo((A[3] + .5) * T, (A[4] + .5) * T); ctx.lineTo((B[3] + .5) * T, (B[4] + .5) * T); ctx.stroke();
+    ctx.strokeStyle = COLORS[owner] || "#fff";
+    ctx.beginPath(); ctx.moveTo((A[0] + .5) * T, (A[1] + .5) * T); ctx.lineTo((B[0] + .5) * T, (B[1] + .5) * T); ctx.stroke();
   }
-  if (S.selected != null && byId[S.selected] && entsOf(f).some((e) => e[0] === S.selected)) {
-    const e = byId[S.selected];
+  if (S.selected != null && pos[S.selected]) {
+    const p = pos[S.selected];
     ctx.strokeStyle = "#fff"; ctx.lineWidth = 2;
-    ctx.strokeRect(e[3] * T - 2, e[4] * T - 2, T + 4, T + 4);
+    ctx.strokeRect(p[0] * T - 2, p[1] * T - 2, T + 4, T + 4);
   }
   updatePanels(f);
 }
 
-function drawEntity(e, tick) {
-  const [id, owner, ki, x, y, hp] = e;
+// Entities teleport one tile per move in the sim. To animate, find the entity's most recent move
+// (within the last 8 frames) and glide from the old tile to the new one over `speed` ticks, which
+// is exactly how long the sim makes it wait before the next move, so motion looks continuous.
+function byRow(i, id) {
+  let m = S.maps[i];
+  if (!m) { m = S.maps[i] = new Map(); for (const e of entsOf(S.frames[i])) m.set(e[0], e); }
+  return m.get(id);
+}
+
+function displayPos(e, i, t) {
+  const [id, , ki, x, y] = e;
+  const speed = (S.header.speed || {})[S.header.kinds[ki]] || 4;
+  for (let j = i, n = 0; j > 0 && n < 8; j--, n++) {
+    const before = byRow(j - 1, id);
+    if (!before) break;                                   // just spawned: no glide
+    if (before[3] !== x || before[4] !== y) {
+      const k = Math.min(1, Math.max(0, (t - j) / speed));
+      if (x !== before[3]) S.dir[id] = Math.sign(x - before[3]);
+      return [before[3] + (x - before[3]) * k, before[4] + (y - before[4]) * k];
+    }
+  }
+  return [x, y];
+}
+
+function drawEntity(e, p) {
+  const [id, owner, ki, , , hp] = e;
+  const [x, y] = p;
   const kind = S.header.kinds[ki], T = S.tile, max = S.header.maxhp[kind] || hp;
   const cx = (x + .5) * T, cy = (y + .5) * T;
   const spec = (S.skin.kinds || {})[kind];
@@ -149,9 +178,14 @@ function drawEntity(e, tick) {
     return;
   }
   if (img && img.ok) {
-    const frame = spec.frames > 1 ? Math.floor(tick / 3 + id) % spec.frames : 0;
+    const frame = spec.frames > 1 ? Math.floor(performance.now() / 110 + id) % spec.frames : 0;   // idle loop on a wall clock, not sim ticks
     const w = spec.w * T, h = w * spec.fh / spec.fw;
-    ctx.drawImage(img, frame * spec.fw, 0, spec.fw, spec.fh, cx - w / 2, cy - h / 2 + (spec.yoff || 0) * T + T * .2, w, h);
+    const flip = S.dir[id] < 0;
+    ctx.save();
+    ctx.translate(cx, 0);
+    if (flip) ctx.scale(-1, 1);
+    ctx.drawImage(img, frame * spec.fw, 0, spec.fw, spec.fh, -w / 2, cy - h / 2 + (spec.yoff || 0) * T + T * .2, w, h);
+    ctx.restore();
     if (spec.label) { ctx.fillStyle = "#fff"; ctx.font = `bold ${T * .38}px sans-serif`; ctx.textAlign = "center"; ctx.fillText(spec.label, cx, cy + T * .75); }
   } else {
     ctx.fillStyle = COLORS[owner] || "#aaa";
@@ -202,11 +236,13 @@ function updatePanels(f) {
 function frameLoop(now) {
   const dt = Math.min(0.25, (now - (S.last || now)) / 1000);
   S.last = now;
-  if (S.mode === "replay" && S.playing && S.frames.length) {
-    S.acc += dt * S.tps;
-    const adv = Math.floor(S.acc);
-    S.acc -= adv;
-    S.cur = Math.min(S.frames.length - 1, S.cur + adv);
+  const latest = S.frames.length - 1;
+  if (latest >= 0) {
+    if (S.mode === "replay" && S.playing) S.t = Math.min(latest, S.t + dt * S.tps);
+    else if (S.mode === "live" && S.followLive) {
+      S.t = Math.min(latest, S.t + dt * S.tps);
+      if (latest - S.t > Math.max(3, S.tps * 0.5)) S.t = latest - 1;     // far behind (dropped frames): jump up
+    }
   }
   draw();
   requestAnimationFrame(frameLoop);
@@ -221,10 +257,10 @@ $("play").onclick = () => {
 };
 $("step").onclick = () => {
   if (S.mode === "live") { send({ cmd: "pause" }); send({ cmd: "step" }); }
-  else { S.playing = false; $("play").textContent = "Play"; S.cur = Math.min(S.frames.length - 1, S.cur + 1); }
+  else { S.playing = false; $("play").textContent = "Play"; S.t = Math.min(S.frames.length - 1, Math.floor(S.t) + 1); }
 };
 $("speed").onchange = (e) => { S.tps = +e.target.value; if (S.mode === "live") send({ cmd: "speed", v: S.tps }); };
-$("scrub").oninput = (e) => { S.cur = +e.target.value; S.followLive = S.cur >= S.frames.length - 1; };
+$("scrub").oninput = (e) => { S.t = +e.target.value; S.followLive = S.t >= S.frames.length - 2; };
 $("live").onclick = watchLive;
 $("load").onclick = () => { const v = $("replays").value; if (v) openReplay(v); };
 $("skin").onchange = (e) => loadSkin(e.target.value);
@@ -234,7 +270,7 @@ canvas.onclick = (ev) => {
   const tx = (ev.clientX - r.left) / T, ty = (ev.clientY - r.top) / T;
   const f = S.frames[S.cur];
   let best = null;
-  for (const e of entsOf(f)) { const d = Math.hypot(e[3] + .5 - tx, e[4] + .5 - ty); if (d < 1.2 && (!best || d < best[0])) best = [d, e[0]]; }
+  for (const e of entsOf(f)) { const q = displayPos(e, S.cur, S.t); const d = Math.hypot(q[0] + .5 - tx, q[1] + .5 - ty); if (d < 1.2 && (!best || d < best[0])) best = [d, e[0]]; }
   S.selected = best ? best[1] : null;
   if (!best) $("sel").textContent = "click a unit";
 };

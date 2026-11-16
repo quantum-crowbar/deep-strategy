@@ -34,7 +34,8 @@ class Match:
 
     def header(self) -> dict[str, Any]:
         return {"rules_hash": self.rules.hash, "rules_version": self.rules.version, "seed": self.seed,
-                "map": self.map, "specs": self.specs, "kinds": self.kinds, "maxhp": self.max_hp()}
+                "map": self.map, "specs": self.specs, "kinds": self.kinds, "maxhp": self.max_hp(),
+                "speed": {u: self.rules.units[u]["speed"] for u in self.rules.units}}
 
     def max_hp(self) -> dict[str, int]:
         r = self.rules
