@@ -1,0 +1,13 @@
+{
+  "name": "tinyswords",
+  "note": "CC0 Tiny Swords by Pixel Frog (via ejaj-boj). Run scripts/setup_skin.py to copy the PNGs; they are not committed (D23).",
+  "players": ["p0", "p1"],
+  "kinds": {
+    "hall":     { "image": "tinyswords/{p}_castle.png",   "fw": 320, "fh": 256, "frames": 1, "w": 4.2, "yoff": -0.3 },
+    "barracks": { "image": "tinyswords/{p}_barracks.png", "fw": 192, "fh": 256, "frames": 1, "w": 2.6, "yoff": -0.3 },
+    "worker":   { "image": "tinyswords/{p}_pawn.png",     "fw": 192, "fh": 192, "frames": 8, "w": 2.2, "yoff": -0.1 },
+    "sword":    { "image": "tinyswords/{p}_warrior.png",  "fw": 192, "fh": 192, "frames": 8, "w": 2.4, "yoff": -0.1, "label": "S" },
+    "archer":   { "image": "tinyswords/{p}_warrior.png",  "fw": 192, "fh": 192, "frames": 8, "w": 2.0, "yoff": -0.1, "label": "A" },
+    "knight":   { "image": "tinyswords/{p}_warrior.png",  "fw": 192, "fh": 192, "frames": 8, "w": 2.9, "yoff": -0.1, "label": "K" }
+  }
+}
